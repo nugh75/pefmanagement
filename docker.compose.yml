@@ -1,0 +1,50 @@
+
+
+services:
+  app:
+    build:
+      context: ./app-nextjs
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://postgres:Lagom192.@db:5432/pefmanagementschema
+      - DIRECT_URL=postgresql://postgres:Lagom192.@db:5432/pefmanagementschema
+      - NEXTAUTH_URL=http://localhost:3001
+      - NEXTAUTH_SECRET=your-super-secret-key-change-in-production
+      - SKIP_LDAP=true
+      - NEXT_PUBLIC_APP_URL=http://localhost:3001
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - pef-network
+
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: Lagom192.
+      POSTGRES_DB: pefmanagementschema
+    ports:
+      - "5434:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pefmanagementschema"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pef-network
+
+networks:
+  pef-network:
+    driver: bridge
+
+volumes:
+  db_data:

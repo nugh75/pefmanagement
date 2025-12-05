@@ -1,3 +1,33 @@
+# System files
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+*.env
+
+# Local files
+cookies.txt
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Node modules (if installed in root)
+node_modules/
+dist/
+build/
+coverage/
+
+# IDEs
+.vscode/
+.idea/
+
+# Next.js (if any remnants in root)
+.next/
+out/
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
