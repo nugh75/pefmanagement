@@ -1,0 +1,494 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+/// Dipartimenti
+model Department {
+  id                           String                       @id @default(dbgenerated("uuid_generate_v4()")) @map("department_id") @db.Uuid
+  name                         String                       @unique @db.VarChar(255)
+  code                         String?                      @unique @db.VarChar(50)
+  description                  String?
+  coordinatorTutorProfiles     CoordinatorTutorProfile[]
+  courses                      Course[]
+  departmentCompetitionClasses DepartmentCompetitionClass[]
+  teacherProfiles              TeacherProfile[]
+  trainingProjects             TrainingProject[]
+  users                        User[]
+
+  @@map("departments")
+}
+
+/// Anni Accademici ed Edizioni
+model AcademicYearEdition {
+  id                       String                    @id @default(dbgenerated("uuid_generate_v4()")) @map("academic_year_edition_id") @db.Uuid
+  yearLabel                String                    @map("year_label") @db.VarChar(100)
+  editionLabel             String                    @map("edition_label") @db.VarChar(100)
+  startDate                DateTime                  @map("start_date") @db.Date
+  endDate                  DateTime                  @map("end_date") @db.Date
+  description              String?
+  finalExamSchedules       FinalExamSchedule[]
+  payments                 Payment[]
+  teacherCourseAssignments TeacherCourseAssignment[]
+  trainingProjects         TrainingProject[]
+
+  @@unique([yearLabel, editionLabel])
+  @@map("academic_years_editions")
+}
+
+/// Tipologie di Percorso
+model CourseType {
+  id                 String                   @id @default(dbgenerated("uuid_generate_v4()")) @map("course_type_id") @db.Uuid
+  name               String                   @unique @db.VarChar(255)
+  description        String?
+  hasInItinereExams  Boolean                  @default(false) @map("has_in_itinere_exams")
+  cfuStructures      CourseTypeCfuStructure[]
+  finalExamSchedules FinalExamSchedule[]
+  trainingProjects   TrainingProject[]
+
+  @@map("course_types")
+}
+
+/// Classi di Concorso
+model CompetitionClass {
+  id                           String                       @id @default(dbgenerated("uuid_generate_v4()")) @map("competition_class_id") @db.Uuid
+  code                         String                       @unique @db.VarChar(50)
+  name                         String                       @db.VarChar(255)
+  description                  String?
+  courseCompetitionClasses     CourseCompetitionClass[]
+  departmentCompetitionClasses DepartmentCompetitionClass[]
+  lessonCompetitionClasses     LessonCompetitionClass[]
+  teacherProfiles              TeacherProfile[]
+
+  @@map("competition_classes")
+}
+
+/// Istituti Scolastici
+model School {
+  id                        String                     @id @default(dbgenerated("uuid_generate_v4()")) @map("school_id") @db.Uuid
+  name                      String                     @db.VarChar(255)
+  address                   String?                    @db.VarChar(255)
+  city                      String?                    @db.VarChar(100)
+  province                  String?                    @db.VarChar(100)
+  contactPerson             String?                    @map("contact_person") @db.VarChar(255)
+  phone                     String?                    @db.VarChar(50)
+  email                     String?                    @db.VarChar(255)
+  collaboratorTutorProfiles CollaboratorTutorProfile[]
+  directInternships         DirectInternship[]
+
+  @@map("schools")
+}
+
+/// Referenti USR
+model UsrReferent {
+  id            String  @id @default(dbgenerated("uuid_generate_v4()")) @map("usr_referent_id") @db.Uuid
+  firstName     String  @map("first_name") @db.VarChar(100)
+  lastName      String  @map("last_name") @db.VarChar(100)
+  email         String  @unique @db.VarChar(255)
+  phone         String? @db.VarChar(50)
+  usrOfficeName String? @map("usr_office_name") @db.VarChar(255)
+
+  @@map("usr_referents")
+}
+
+/// Utenti del Sistema
+model User {
+  id                       String                    @id @default(dbgenerated("uuid_generate_v4()")) @map("user_id") @db.Uuid
+  email                    String                    @unique @db.VarChar(255)
+  passwordHash             String                    @map("password_hash") @db.VarChar(255)
+  role                     String                    @db.VarChar(50)
+  isActive                 Boolean                   @default(true) @map("is_active")
+  departmentId             String?                   @map("department_id") @db.Uuid
+  createdAt                DateTime?                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime?                 @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  collaboratorTutorProfile CollaboratorTutorProfile?
+  coordinatorTutorProfile  CoordinatorTutorProfile?
+  studentProfile           StudentProfile?
+  teacherProfile           TeacherProfile?
+  department               Department?               @relation(fields: [departmentId], references: [id], onUpdate: NoAction)
+
+  @@map("users")
+}
+
+/// Profili Corsisti
+model StudentProfile {
+  id                            String                         @id @default(dbgenerated("uuid_generate_v4()")) @map("student_id") @db.Uuid
+  userId                        String                         @unique @map("user_id") @db.Uuid
+  firstName                     String                         @map("first_name") @db.VarChar(100)
+  lastName                      String                         @map("last_name") @db.VarChar(100)
+  fiscalCode                    String                         @unique @map("fiscal_code") @db.VarChar(16)
+  dateOfBirth                   DateTime?                      @map("date_of_birth") @db.Date
+  address                       String?                        @db.VarChar(255)
+  city                          String?                        @db.VarChar(100)
+  phone                         String?                        @db.VarChar(50)
+  directInternshipAttendances   DirectInternshipAttendance[]
+  directInternships             DirectInternship[]
+  indirectInternshipAttendances IndirectInternshipAttendance[]
+  indirectInternships           IndirectInternship[]
+  lessonAttendances             LessonAttendance[]
+  payments                      Payment[]
+  recognitions                  Recognition[]
+  user                          User                           @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  trainingProjects              TrainingProject[]
+
+  @@map("student_profiles")
+}
+
+/// Profili Docenti
+model TeacherProfile {
+  id                       String                    @id @default(dbgenerated("uuid_generate_v4()")) @map("teacher_id") @db.Uuid
+  userId                   String                    @unique @map("user_id") @db.Uuid
+  firstName                String                    @map("first_name") @db.VarChar(100)
+  lastName                 String                    @map("last_name") @db.VarChar(100)
+  departmentId             String?                   @map("department_id") @db.Uuid
+  competitionClassId       String?                   @map("competition_class_id") @db.Uuid
+  phone                    String?                   @db.VarChar(50)
+  finalExamCommissions     FinalExamCommission[]
+  lessons                  Lesson[]
+  teacherCourseAssignments TeacherCourseAssignment[]
+  competitionClass         CompetitionClass?         @relation(fields: [competitionClassId], references: [id], onUpdate: NoAction)
+  department               Department?               @relation(fields: [departmentId], references: [id], onUpdate: NoAction)
+  user                     User                      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("teacher_profiles")
+}
+
+/// Profili Tutor Coordinatori
+model CoordinatorTutorProfile {
+  id                  String               @id @default(dbgenerated("uuid_generate_v4()")) @map("tutor_id") @db.Uuid
+  userId              String               @unique @map("user_id") @db.Uuid
+  firstName           String               @map("first_name") @db.VarChar(100)
+  lastName            String               @map("last_name") @db.VarChar(100)
+  departmentId        String?              @map("department_id") @db.Uuid
+  phone               String?              @db.VarChar(50)
+  department          Department?          @relation(fields: [departmentId], references: [id], onUpdate: NoAction)
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  indirectInternships IndirectInternship[]
+
+  @@map("coordinator_tutor_profiles")
+}
+
+/// Profili Tutor Collaboratori
+model CollaboratorTutorProfile {
+  id                String             @id @default(dbgenerated("uuid_generate_v4()")) @map("tutor_id") @db.Uuid
+  userId            String             @unique @map("user_id") @db.Uuid
+  firstName         String             @map("first_name") @db.VarChar(100)
+  lastName          String             @map("last_name") @db.VarChar(100)
+  schoolId          String?            @map("school_id") @db.Uuid
+  phone             String?            @db.VarChar(50)
+  school            School?            @relation(fields: [schoolId], references: [id], onUpdate: NoAction)
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  directInternships DirectInternship[]
+
+  @@map("collaborator_tutor_profiles")
+}
+
+/// Insegnamenti
+model Course {
+  id                       String                    @id @default(dbgenerated("uuid_generate_v4()")) @map("course_id") @db.Uuid
+  name                     String                    @db.VarChar(255)
+  description              String?
+  cfu                      Int
+  departmentId             String?                   @map("department_id") @db.Uuid
+  courseCompetitionClasses CourseCompetitionClass[]
+  department               Department?               @relation(fields: [departmentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  lessons                  Lesson[]
+  recognitions             Recognition[]
+  studentCourseEnrollments StudentCourseEnrollment[]
+  teacherCourseAssignments TeacherCourseAssignment[]
+
+  @@map("courses")
+}
+
+/// Classi di Concorso per Insegnamento
+model CourseCompetitionClass {
+  courseId           String           @map("course_id") @db.Uuid
+  competitionClassId String           @map("competition_class_id") @db.Uuid
+  competitionClass   CompetitionClass @relation(fields: [competitionClassId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  course             Course           @relation(fields: [courseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([courseId, competitionClassId])
+  @@map("course_competition_classes")
+}
+
+/// Assegnazione Docenti a Insegnamenti
+model TeacherCourseAssignment {
+  id                    String              @id @default(dbgenerated("uuid_generate_v4()")) @map("assignment_id") @db.Uuid
+  teacherId             String              @map("teacher_id") @db.Uuid
+  courseId              String              @map("course_id") @db.Uuid
+  academicYearEditionId String              @map("academic_year_edition_id") @db.Uuid
+  academicYearEdition   AcademicYearEdition @relation(fields: [academicYearEditionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  course                Course              @relation(fields: [courseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  teacher               TeacherProfile      @relation(fields: [teacherId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([teacherId, courseId, academicYearEditionId])
+  @@map("teacher_course_assignments")
+}
+
+/// Progetti Formativi
+model TrainingProject {
+  id                       String                    @id @default(dbgenerated("uuid_generate_v4()")) @map("project_id") @db.Uuid
+  studentId                String                    @map("student_id") @db.Uuid
+  courseTypeId             String                    @map("course_type_id") @db.Uuid
+  academicYearEditionId    String                    @map("academic_year_edition_id") @db.Uuid
+  departmentId             String                    @map("department_id") @db.Uuid
+  status                   String                    @default("In_Corso") @db.VarChar(50)
+  startDate                DateTime?                 @map("start_date") @db.Date
+  endDate                  DateTime?                 @map("end_date") @db.Date
+  directInternships        DirectInternship[]
+  indirectInternships      IndirectInternship[]
+  recognitions             Recognition[]
+  studentCourseEnrollments StudentCourseEnrollment[]
+  academicYearEdition      AcademicYearEdition       @relation(fields: [academicYearEditionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  courseType               CourseType                @relation(fields: [courseTypeId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  department               Department                @relation(fields: [departmentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  student                  StudentProfile            @relation(fields: [studentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([studentId, courseTypeId, academicYearEditionId])
+  @@map("training_projects")
+}
+
+/// Iscrizioni Corsisti a Insegnamenti
+model StudentCourseEnrollment {
+  id                String          @id @default(dbgenerated("uuid_generate_v4()")) @map("enrollment_id") @db.Uuid
+  trainingProjectId String          @map("training_project_id") @db.Uuid
+  courseId          String          @map("course_id") @db.Uuid
+  enrollmentDate    DateTime        @default(dbgenerated("CURRENT_DATE")) @map("enrollment_date") @db.Date
+  grade             Decimal?        @db.Decimal(4, 2)
+  course            Course          @relation(fields: [courseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  trainingProject   TrainingProject @relation(fields: [trainingProjectId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([trainingProjectId, courseId])
+  @@map("student_course_enrollments")
+}
+
+/// Lezioni
+model Lesson {
+  id                       String                   @id @default(dbgenerated("uuid_generate_v4()")) @map("lesson_id") @db.Uuid
+  courseId                 String                   @map("course_id") @db.Uuid
+  teacherId                String                   @map("teacher_id") @db.Uuid
+  lessonDate               DateTime                 @map("lesson_date") @db.Date
+  startTime                DateTime                 @map("start_time") @db.Time(6)
+  endTime                  DateTime                 @map("end_time") @db.Time(6)
+  room                     String?                  @db.VarChar(100)
+  pef60All1DeliveryMode    String?                  @default("Non Applicabile") @map("pef60_all1_delivery_mode") @db.VarChar(20)
+  pef30All2DeliveryMode    String?                  @default("Non Applicabile") @map("pef30_all2_delivery_mode") @db.VarChar(20)
+  pef36All5DeliveryMode    String?                  @default("Non Applicabile") @map("pef36_all5_delivery_mode") @db.VarChar(20)
+  pef30Art13DeliveryMode   String?                  @default("Non Applicabile") @map("pef30_art13_delivery_mode") @db.VarChar(20)
+  teamsMeetingLink         String?                  @map("teams_meeting_link") @db.VarChar(255)
+  lessonCfu                Decimal                  @default(0.0) @map("lesson_cfu") @db.Decimal(4, 2)
+  lessonAttendances        LessonAttendance[]
+  lessonCompetitionClasses LessonCompetitionClass[]
+  course                   Course                   @relation(fields: [courseId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  teacher                  TeacherProfile           @relation(fields: [teacherId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("lessons")
+}
+
+/// Classi di Concorso per Lezione
+model LessonCompetitionClass {
+  lessonId           String           @map("lesson_id") @db.Uuid
+  competitionClassId String           @map("competition_class_id") @db.Uuid
+  competitionClass   CompetitionClass @relation(fields: [competitionClassId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  lesson             Lesson           @relation(fields: [lessonId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([lessonId, competitionClassId])
+  @@map("lesson_competition_classes")
+}
+
+/// Frequenze Lezioni
+model LessonAttendance {
+  id               String         @id @default(dbgenerated("uuid_generate_v4()")) @map("attendance_id") @db.Uuid
+  lessonId         String         @map("lesson_id") @db.Uuid
+  studentId        String         @map("student_id") @db.Uuid
+  attendanceStatus String         @map("attendance_status") @db.VarChar(50)
+  attendanceDate   DateTime?      @default(now()) @map("attendance_date") @db.Timestamptz(6)
+  lesson           Lesson         @relation(fields: [lessonId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  student          StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([lessonId, studentId])
+  @@map("lesson_attendances")
+}
+
+/// Tirocinio Diretto
+model DirectInternship {
+  id                  String                       @id @default(dbgenerated("uuid_generate_v4()")) @map("internship_id") @db.Uuid
+  studentId           String                       @map("student_id") @db.Uuid
+  schoolId            String                       @map("school_id") @db.Uuid
+  collaboratorTutorId String?                      @map("collaborator_tutor_id") @db.Uuid
+  trainingProjectId   String                       @map("training_project_id") @db.Uuid
+  startDate           DateTime                     @map("start_date") @db.Date
+  endDate             DateTime                     @map("end_date") @db.Date
+  totalHours          Int                          @map("total_hours")
+  description         String?
+  attendances         DirectInternshipAttendance[]
+  collaboratorTutor   CollaboratorTutorProfile?    @relation(fields: [collaboratorTutorId], references: [id], onUpdate: NoAction)
+  school              School                       @relation(fields: [schoolId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  student             StudentProfile               @relation(fields: [studentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  trainingProject     TrainingProject              @relation(fields: [trainingProjectId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  recognitions        Recognition[]
+
+  @@map("direct_internships")
+}
+
+/// Tirocinio Indiretto
+model IndirectInternship {
+  id                 String                         @id @default(dbgenerated("uuid_generate_v4()")) @map("internship_id") @db.Uuid
+  studentId          String                         @map("student_id") @db.Uuid
+  coordinatorTutorId String?                        @map("coordinator_tutor_id") @db.Uuid
+  trainingProjectId  String                         @map("training_project_id") @db.Uuid
+  startDate          DateTime                       @map("start_date") @db.Date
+  endDate            DateTime                       @map("end_date") @db.Date
+  totalHours         Int                            @map("total_hours")
+  description        String?
+  attendances        IndirectInternshipAttendance[]
+  coordinatorTutor   CoordinatorTutorProfile?       @relation(fields: [coordinatorTutorId], references: [id], onUpdate: NoAction)
+  student            StudentProfile                 @relation(fields: [studentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  trainingProject    TrainingProject                @relation(fields: [trainingProjectId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  recognitions       Recognition[]
+
+  @@map("indirect_internships")
+}
+
+/// Frequenza Tirocinio Diretto
+model DirectInternshipAttendance {
+  id                 String           @id @default(dbgenerated("uuid_generate_v4()")) @map("attendance_id") @db.Uuid
+  directInternshipId String           @map("direct_internship_id") @db.Uuid
+  studentId          String           @map("student_id") @db.Uuid
+  date               DateTime         @db.Date
+  hoursAttended      Int              @map("hours_attended")
+  description        String?
+  directInternship   DirectInternship @relation(fields: [directInternshipId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  student            StudentProfile   @relation(fields: [studentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([directInternshipId, date, studentId])
+  @@map("direct_internship_attendances")
+}
+
+/// Frequenza Tirocinio Indiretto
+model IndirectInternshipAttendance {
+  id                   String             @id @default(dbgenerated("uuid_generate_v4()")) @map("attendance_id") @db.Uuid
+  indirectInternshipId String             @map("indirect_internship_id") @db.Uuid
+  studentId            String             @map("student_id") @db.Uuid
+  date                 DateTime           @db.Date
+  hoursAttended        Int                @map("hours_attended")
+  description          String?
+  indirectInternship   IndirectInternship @relation(fields: [indirectInternshipId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  student              StudentProfile     @relation(fields: [studentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([indirectInternshipId, date, studentId], map: "indirect_internship_attendanc_indirect_internship_id_date_s_key")
+  @@map("indirect_internship_attendances")
+}
+
+/// Pagamenti Effettuati
+model Payment {
+  id                    String              @id @default(dbgenerated("uuid_generate_v4()")) @map("payment_id") @db.Uuid
+  studentId             String              @map("student_id") @db.Uuid
+  academicYearEditionId String              @map("academic_year_edition_id") @db.Uuid
+  amount                Decimal             @db.Decimal(10, 2)
+  paymentDate           DateTime            @map("payment_date") @db.Date
+  status                String              @db.VarChar(50)
+  description           String?
+  academicYearEdition   AcademicYearEdition @relation(fields: [academicYearEditionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  student               StudentProfile      @relation(fields: [studentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("payments")
+}
+
+/// Calendario Prove Finali
+model FinalExamSchedule {
+  id                    String                @id @default(dbgenerated("uuid_generate_v4()")) @map("schedule_id") @db.Uuid
+  academicYearEditionId String                @map("academic_year_edition_id") @db.Uuid
+  courseTypeId          String?               @map("course_type_id") @db.Uuid
+  examDate              DateTime              @map("exam_date") @db.Date
+  startTime             DateTime?             @map("start_time") @db.Time(6)
+  endTime               DateTime?             @map("end_time") @db.Time(6)
+  location              String?               @db.VarChar(255)
+  description           String?
+  commissions           FinalExamCommission[]
+  academicYearEdition   AcademicYearEdition   @relation(fields: [academicYearEditionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  courseType            CourseType?           @relation(fields: [courseTypeId], references: [id], onUpdate: NoAction)
+
+  @@map("final_exam_schedule")
+}
+
+/// Commissioni Prove Finali
+model FinalExamCommission {
+  id               String            @id @default(dbgenerated("uuid_generate_v4()")) @map("commission_id") @db.Uuid
+  scheduleId       String            @map("schedule_id") @db.Uuid
+  teacherId        String            @map("teacher_id") @db.Uuid
+  roleInCommission String?           @map("role_in_commission") @db.VarChar(100)
+  schedule         FinalExamSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  teacher          TeacherProfile    @relation(fields: [teacherId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([scheduleId, teacherId])
+  @@map("final_exam_commissions")
+}
+
+/// Riconoscimenti
+model Recognition {
+  id                             String              @id @default(dbgenerated("uuid_generate_v4()")) @map("recognition_id") @db.Uuid
+  studentId                      String              @map("student_id") @db.Uuid
+  trainingProjectId              String              @map("training_project_id") @db.Uuid
+  recognizedCourseId             String?             @map("recognized_course_id") @db.Uuid
+  recognizedDirectInternshipId   String?             @map("recognized_direct_internship_id") @db.Uuid
+  recognizedIndirectInternshipId String?             @map("recognized_indirect_internship_id") @db.Uuid
+  cfuRecognized                  Int                 @map("cfu_recognized")
+  recognitionDate                DateTime            @default(dbgenerated("CURRENT_DATE")) @map("recognition_date") @db.Date
+  status                         String              @db.VarChar(50)
+  notes                          String?
+  recognizedCourse               Course?             @relation(fields: [recognizedCourseId], references: [id], onUpdate: NoAction)
+  recognizedDirectInternship     DirectInternship?   @relation(fields: [recognizedDirectInternshipId], references: [id], onUpdate: NoAction)
+  recognizedIndirectInternship   IndirectInternship? @relation(fields: [recognizedIndirectInternshipId], references: [id], onUpdate: NoAction)
+  student                        StudentProfile      @relation(fields: [studentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  trainingProject                TrainingProject     @relation(fields: [trainingProjectId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("recognitions")
+}
+
+/// Categorie CFU
+model CfuCategory {
+  id            String                   @id @default(dbgenerated("uuid_generate_v4()")) @map("cfu_category_id") @db.Uuid
+  name          String                   @unique @db.VarChar(255)
+  categoryType  String                   @map("category_type") @db.VarChar(50)
+  description   String?
+  cfuStructures CourseTypeCfuStructure[]
+
+  @@map("cfu_categories")
+}
+
+/// Struttura CFU Tipologia Percorso
+model CourseTypeCfuStructure {
+  id            String      @id @default(dbgenerated("uuid_generate_v4()")) @map("structure_id") @db.Uuid
+  courseTypeId  String      @map("course_type_id") @db.Uuid
+  cfuCategoryId String      @map("cfu_category_id") @db.Uuid
+  cfuAmount     Int         @map("cfu_amount")
+  notes         String?
+  cfuCategory   CfuCategory @relation(fields: [cfuCategoryId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  courseType    CourseType  @relation(fields: [courseTypeId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([courseTypeId, cfuCategoryId])
+  @@map("course_type_cfu_structure")
+}
+
+/// Classi di Concorso Attivate per Dipartimento
+model DepartmentCompetitionClass {
+  id                 String           @id @default(dbgenerated("uuid_generate_v4()")) @map("department_competition_class_id") @db.Uuid
+  departmentId       String           @map("department_id") @db.Uuid
+  competitionClassId String           @map("competition_class_id") @db.Uuid
+  isActive           Boolean          @default(true) @map("is_active")
+  activationDate     DateTime         @default(dbgenerated("CURRENT_DATE")) @map("activation_date") @db.Date
+  deactivationDate   DateTime?        @map("deactivation_date") @db.Date
+  description        String?
+  competitionClass   CompetitionClass @relation(fields: [competitionClassId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  department         Department       @relation(fields: [departmentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([departmentId, competitionClassId], map: "department_competition_classe_department_id_competition_cla_key")
+  @@map("department_competition_classes")
+}
