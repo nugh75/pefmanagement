@@ -1,0 +1,1985 @@
+{
+  "schemaName": "PefManagementSchema",
+  "description": "Questo schema di database è progettato per la gestione completa dei Percorsi Abilitanti Insegnanti (PEF) 30/36/60 CFU, inclusi studenti, docenti, insegnamenti, tirocini, lezioni, pagamenti e prove finali. Utilizza la Row Level Security per garantire che ogni ruolo utente abbia accesso solo ai dati pertinenti. Sono state aggiunte nuove tabelle per definire la struttura dettagliata dei CFU per ogni tipologia di percorso, conformemente ai DPCM pertinenti. La struttura degli insegnamenti è stata migliorata per supportare classi di concorso multiple e le lezioni includono ora dettagli specifici sulla modalità di erogazione per diversi percorsi PEF, link a piattaforme di riunione e sono direttamente collegate a una o più classi di concorso.",
+  "departments": [
+    "Amministrazione TLC",
+    "Dipartimento"
+  ],
+  "sqlDDL": "-- Nota: Il DDL potrebbe non essere sincronizzato con le modifiche manuali recenti.\n-- Chiedi all'IA di 'Rigenerare SQL' per aggiornare.\n\nCREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";CREATE ROLE rls_tlc;CREATE ROLE rls_dipartimento;CREATE ROLE rls_docente;CREATE ROLE rls_corsista;CREATE ROLE rls_coord_tutor;CREATE ROLE rls_collab_tutor;CREATE TABLE departments (department_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),name VARCHAR(255) NOT NULL UNIQUE,code VARCHAR(50) UNIQUE,description TEXT);CREATE TABLE academic_years_editions (academic_year_edition_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),year_label VARCHAR(100) NOT NULL,edition_label VARCHAR(100) NOT NULL,start_date DATE NOT NULL,end_date DATE NOT NULL,description TEXT,UNIQUE (year_label, edition_label));CREATE TABLE course_types (course_type_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),name VARCHAR(255) NOT NULL UNIQUE,description TEXT,has_in_itinere_exams BOOLEAN NOT NULL DEFAULT FALSE);CREATE TABLE competition_classes (competition_class_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),code VARCHAR(50) NOT NULL UNIQUE,name VARCHAR(255) NOT NULL,description TEXT);CREATE TABLE schools (school_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),name VARCHAR(255) NOT NULL,address VARCHAR(255),city VARCHAR(100),province VARCHAR(100),contact_person VARCHAR(255),phone VARCHAR(50),email VARCHAR(255));CREATE TABLE usr_referents (usr_referent_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),first_name VARCHAR(100) NOT NULL,last_name VARCHAR(100) NOT NULL,email VARCHAR(255) UNIQUE NOT NULL,phone VARCHAR(50),usr_office_name VARCHAR(255));CREATE TABLE users (user_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),email VARCHAR(255) UNIQUE NOT NULL,password_hash VARCHAR(255) NOT NULL,role VARCHAR(50) NOT NULL CHECK (role IN ('TLC', 'DIPARTIMENTO', 'DOCENTE', 'CORSISTA', 'COORD_TUTOR', 'COLLAB_TUTOR')),is_active BOOLEAN NOT NULL DEFAULT TRUE,department_id UUID REFERENCES departments(department_id) ON DELETE SET NULL,created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);CREATE OR REPLACE FUNCTION update_updated_at_column() RETURNS TRIGGER AS $$ BEGIN NEW.updated_at = NOW(); RETURN NEW; END; $$ LANGUAGE plpgsql;CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();CREATE TABLE student_profiles (student_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),user_id UUID UNIQUE NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,first_name VARCHAR(100) NOT NULL,last_name VARCHAR(100) NOT NULL,fiscal_code VARCHAR(16) UNIQUE NOT NULL,date_of_birth DATE,address VARCHAR(255),city VARCHAR(100),phone VARCHAR(50));ALTER TABLE student_profiles ENABLE ROW LEVEL SECURITY;CREATE POLICY student_rls_policy ON student_profiles FOR ALL USING ((current_setting('app.user_role') = 'TLC') OR (current_setting('app.user_role') = 'DIPARTIMENTO' AND student_id IN (SELECT sp.student_id FROM student_profiles sp JOIN training_projects tp ON sp.student_id = tp.student_id WHERE tp.department_id = (SELECT u.department_id FROM users u WHERE u.user_id = current_setting('app.user_id')::uuid))) OR (current_setting('app.user_role') = 'CORSISTA' AND user_id = current_setting('app.user_id')::uuid));CREATE TABLE teacher_profiles (teacher_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),user_id UUID UNIQUE NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,first_name VARCHAR(100) NOT NULL,last_name VARCHAR(100) NOT NULL,department_id UUID REFERENCES departments(department_id) ON DELETE SET NULL,competition_class_id UUID REFERENCES competition_classes(competition_class_id) ON DELETE SET NULL,phone VARCHAR(50));ALTER TABLE teacher_profiles ENABLE ROW LEVEL SECURITY;CREATE POLICY teacher_rls_policy ON teacher_profiles FOR ALL USING ((current_setting('app.user_role') = 'TLC') OR (current_setting('app.user_role') = 'DIPARTIMENTO' AND department_id = (SELECT department_id FROM users WHERE user_id = current_setting('app.user_id')::uuid)) OR (current_setting('app.user_role') = 'DOCENTE' AND user_id = current_setting('app.user_id')::uuid));CREATE TABLE coordinator_tutor_profiles (tutor_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),user_id UUID UNIQUE NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,first_name VARCHAR(100) NOT NULL,last_name VARCHAR(100) NOT NULL,department_id UUID REFERENCES departments(department_id) ON DELETE SET NULL,phone VARCHAR(50));ALTER TABLE coordinator_tutor_profiles ENABLE ROW LEVEL SECURITY;CREATE POLICY coordinator_tutor_rls_policy ON coordinator_tutor_profiles FOR ALL USING ((current_setting('app.user_role') = 'TLC') OR (current_setting('app.user_role') = 'DIPARTIMENTO' AND department_id = (SELECT department_id FROM users WHERE user_id = current_setting('app.user_id')::uuid)) OR (current_setting('app.user_role') = 'COORD_TUTOR' AND user_id = current_setting('app.user_id')::uuid));CREATE TABLE collaborator_tutor_profiles (tutor_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),user_id UUID UNIQUE NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,first_name VARCHAR(100) NOT NULL,last_name VARCHAR(100) NOT NULL,school_id UUID REFERENCES schools(school_id) ON DELETE SET NULL,phone VARCHAR(50));ALTER TABLE collaborator_tutor_profiles ENABLE ROW LEVEL SECURITY;CREATE POLICY collaborator_tutor_rls_policy ON collaborator_tutor_profiles FOR ALL USING ((current_setting('app.user_role') = 'TLC') OR (current_setting('app.user_role') = 'DIPARTIMENTO') OR (current_setting('app.user_role') = 'COLLAB_TUTOR' AND user_id = current_setting('app.user_id')::uuid));ALTER TABLE courses DROP COLUMN IF EXISTS competition_class_id;CREATE TABLE courses (course_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),name VARCHAR(255) NOT NULL,description TEXT,cfu INT NOT NULL,department_id UUID REFERENCES departments(department_id) ON DELETE CASCADE);ALTER TABLE courses ENABLE ROW LEVEL SECURITY;CREATE POLICY courses_rls_policy ON courses FOR ALL USING ((current_setting('app.user_role') = 'TLC') OR (current_setting('app.user_role') = 'DIPARTIMENTO' AND department_id = (SELECT department_id FROM users WHERE user_id = current_setting('app.user_id')::uuid)) OR (current_setting('app.user_role') IN ('DOCENTE', 'CORSISTA', 'COORD_TUTOR', 'COLLAB_TUTOR')));CREATE TABLE course_competition_classes (course_id UUID NOT NULL REFERENCES courses(course_id) ON DELETE CASCADE,competition_class_id UUID NOT NULL REFERENCES competition_classes(competition_class_id) ON DELETE CASCADE,PRIMARY KEY (course_id, competition_class_id));CREATE TABLE teacher_course_assignments (assignment_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),teacher_id UUID NOT NULL REFERENCES teacher_profiles(teacher_id) ON DELETE CASCADE,course_id UUID NOT NULL REFERENCES courses(course_id) ON DELETE CASCADE,academic_year_edition_id UUID NOT NULL REFERENCES academic_years_editions(academic_year_edition_id) ON DELETE CASCADE,UNIQUE (teacher_id, course_id, academic_year_edition_id));ALTER TABLE teacher_course_assignments ENABLE ROW LEVEL SECURITY;CREATE POLICY teacher_course_assignments_rls_policy ON teacher_course_assignments FOR ALL USING ((current_setting('app.user_role') = 'TLC') OR (current_setting('app.user_role') = 'DIPARTIMENTO' AND course_id IN (SELECT course_id FROM courses WHERE department_id = (SELECT department_id FROM users WHERE user_id = current_setting('app.user_id')::uuid))) OR (current_setting('app.user_role') = 'DOCENTE' AND teacher_id = (SELECT teacher_id FROM teacher_profiles WHERE user_id = current_setting('app.user_id')::uuid)));DROP POLICY IF EXISTS training_projects_rls_policy ON training_projects;CREATE TABLE training_projects (project_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),student_id UUID NOT NULL REFERENCES student_profiles(student_id) ON DELETE CASCADE,course_type_id UUID NOT NULL REFERENCES course_types(course_type_id) ON DELETE CASCADE,academic_year_edition_id UUID NOT NULL REFERENCES academic_years_editions(academic_year_edition_id) ON DELETE CASCADE,department_id UUID NOT NULL REFERENCES departments(department_id) ON DELETE CASCADE,status VARCHAR(50) NOT NULL DEFAULT 'In_Corso' CHECK (status IN ('In_Corso', 'Completato', 'Sospeso', 'Annullato')),start_date DATE,end_date DATE,UNIQUE (student_id, course_type_id, academic_year_edition_id));ALTER TABLE training_projects ENABLE ROW LEVEL SECURITY;CREATE POLICY training_projects_rls_policy ON training_projects FOR ALL USING ((current_setting('app.user_role') = 'TLC') OR (current_setting('app.user_role') = 'DIPARTIMENTO' AND department_id = (SELECT department_id FROM users WHERE user_id = current_setting('app.user_id')::uuid)) OR (current_setting('app.user_role') = 'CORSISTA' AND student_id = (SELECT student_id FROM student_profiles WHERE user_id = current_setting('app.user_id')::uuid)) OR (current_setting('app.user_role') = 'DOCENTE' AND EXISTS (SELECT 1 FROM student_course_enrollments sce JOIN teacher_course_assignments tca ON sce.course_id = tca.course_id WHERE sce.training_project_id = training_projects.project_id AND tca.teacher_id = (SELECT teacher_id FROM teacher_profiles WHERE user_id = current_setting('app.user_id')::uuid))));CREATE TABLE student_course_enrollments (enrollment_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),training_project_id UUID NOT NULL REFERENCES training_projects(project_id) ON DELETE CASCADE,course_id UUID NOT NULL REFERENCES courses(course_id) ON DELETE CASCADE,enrollment_date DATE NOT NULL DEFAULT CURRENT_DATE,grade DECIMAL(4,2),UNIQUE (training_project_id, course_id));ALTER TABLE student_course_enrollments ENABLE ROW LEVEL SECURITY;CREATE POLICY student_course_enrollments_rls_policy ON student_course_enrollments FOR ALL USING ((current_setting('app.user_role') = 'TLC') OR (current_setting('app.user_role') = 'DIPARTIMENTO' AND training_project_id IN (SELECT project_id FROM training_projects WHERE department_id = (SELECT department_id FROM users WHERE user_id = current_setting('app.user_id')::uuid))) OR (current_setting('app.user_role') = 'CORSISTA' AND training_project_id IN (SELECT project_id FROM training_projects WHERE student_id = (SELECT student_id FROM student_profiles WHERE user_id = current_setting('app.user_id')::uuid))) OR (current_setting('app.user_role') = 'DOCENTE' AND course_id IN (SELECT course_id FROM teacher_course_assignments WHERE teacher_id = (SELECT teacher_id FROM teacher_profiles WHERE user_id = current_setting('app.user_id')::uuid))));DROP POLICY IF EXISTS lessons_rls_policy ON lessons;DROP TABLE IF EXISTS lesson_attendances CASCADE;DROP TABLE IF EXISTS lesson_competition_classes CASCADE;DROP TABLE IF EXISTS lessons CASCADE;CREATE TABLE lessons (lesson_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),course_id UUID NOT NULL REFERENCES courses(course_id) ON DELETE CASCADE,teacher_id UUID NOT NULL REFERENCES teacher_profiles(teacher_id) ON DELETE CASCADE,lesson_date DATE NOT NULL,start_time TIME NOT NULL,end_time TIME NOT NULL,room VARCHAR(100),pef60_all1_delivery_mode VARCHAR(20) DEFAULT 'Non Applicabile' CHECK (pef60_all1_delivery_mode IN ('Presenza', 'Online', 'Non Applicabile')),pef30_all2_delivery_mode VARCHAR(20) DEFAULT 'Non Applicabile' CHECK (pef30_all2_delivery_mode IN ('Presenza', 'Online', 'Non Applicabile')),pef36_all5_delivery_mode VARCHAR(20) DEFAULT 'Non Applicabile' CHECK (pef36_all5_delivery_mode IN ('Presenza', 'Online', 'Non Applicabile')),pef30_art13_delivery_mode VARCHAR(20) DEFAULT 'Non Applicabile' CHECK (pef30_art13_delivery_mode IN ('Presenza', 'Online', 'Non Applicabile')),teams_meeting_link VARCHAR(255),lesson_cfu DECIMAL(4,2) NOT NULL DEFAULT 0.0);ALTER TABLE lessons ENABLE ROW LEVEL SECURITY;CREATE POLICY lessons_rls_policy ON lessons FOR ALL USING ((current_setting('app.user_role') = 'TLC') OR (current_setting('app.user_role') = 'DIPARTIMENTO' AND course_id IN (SELECT course_id FROM courses WHERE department_id = (SELECT department_id FROM users WHERE user_id = current_setting('app.user_id')::uuid))) OR (current_setting('app.user_role') = 'CORSISTA' AND course_id IN (SELECT sce.course_id FROM student_course_enrollments sce JOIN training_projects tp ON sce.training_project_id = tp.project_id WHERE tp.student_id = (SELECT student_id FROM student_profiles WHERE user_id = current_setting('app.user_id')::uuid))) OR (current_setting('app.user_role') = 'DOCENTE' AND teacher_id = (SELECT teacher_id FROM teacher_profiles WHERE user_id = current_setting('app.user_id')::uuid)));CREATE TABLE lesson_competition_classes (lesson_id UUID NOT NULL REFERENCES lessons(lesson_id) ON DELETE CASCADE,competition_class_id UUID NOT NULL REFERENCES competition_classes(competition_class_id) ON DELETE CASCADE,PRIMARY KEY (lesson_id, competition_class_id));CREATE TABLE lesson_attendances (attendance_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),lesson_id UUID NOT NULL REFERENCES lessons(lesson_id) ON DELETE CASCADE,student_id UUID NOT NULL REFERENCES student_profiles(student_id) ON DELETE CASCADE,attendance_status VARCHAR(50) NOT NULL CHECK (attendance_status IN ('Presente', 'Assente', 'Giustificato')),attendance_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,UNIQUE (lesson_id, student_id));ALTER TABLE lesson_attendances ENABLE ROW LEVEL SECURITY;CREATE POLICY lesson_attendances_rls_policy ON lesson_attendances FOR ALL USING ((current_setting('app.user_role') = 'TLC') OR (current_setting('app.user_role') = 'DIPARTIMENTO' AND lesson_id IN (SELECT l.lesson_id FROM lessons l JOIN courses c ON l.course_id = c.course_id WHERE c.department_id = (SELECT department_id FROM users WHERE user_id = current_setting('app.user_id')::uuid))) OR (current_setting('app.user_role') = 'CORSISTA' AND student_id = (SELECT student_id FROM student_profiles WHERE user_id = current_setting('app.user_id')::uuid)) OR (current_setting('app.user_role') = 'DOCENTE' AND lesson_id IN (SELECT lesson_id FROM lessons WHERE teacher_id = (SELECT teacher_id FROM teacher_profiles WHERE user_id = current_setting('app.user_id')::uuid))));CREATE TABLE direct_internships (internship_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),student_id UUID NOT NULL REFERENCES student_profiles(student_id) ON DELETE CASCADE,school_id UUID NOT NULL REFERENCES schools(school_id) ON DELETE CASCADE,collaborator_tutor_id UUID REFERENCES collaborator_tutor_profiles(tutor_id) ON DELETE SET NULL,training_project_id UUID NOT NULL REFERENCES training_projects(project_id) ON DELETE CASCADE,start_date DATE NOT NULL,end_date DATE NOT NULL,total_hours INT NOT NULL,description TEXT);ALTER TABLE direct_internships ENABLE ROW LEVEL SECURITY;CREATE POLICY direct_internships_rls_policy ON direct_internships FOR ALL USING ((current_setting('app.user_role') = 'TLC') OR (current_setting('app.user_role') = 'DIPARTIMENTO' AND training_project_id IN (SELECT project_id FROM training_projects WHERE department_id = (SELECT department_id FROM users WHERE user_id = current_setting('app.user_id')::uuid))) OR (current_setting('app.user_role') = 'CORSISTA' AND student_id = (SELECT student_id FROM student_profiles WHERE user_id = current_setting('app.user_id')::uuid)) OR (current_setting('app.user_role') = 'COLLAB_TUTOR' AND collaborator_tutor_id = (SELECT tutor_id FROM collaborator_tutor_profiles WHERE user_id = current_setting('app.user_id')::uuid)));CREATE TABLE indirect_internships (internship_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),student_id UUID NOT NULL REFERENCES student_profiles(student_id) ON DELETE CASCADE,coordinator_tutor_id UUID REFERENCES coordinator_tutor_profiles(tutor_id) ON DELETE SET NULL,training_project_id UUID NOT NULL REFERENCES training_projects(project_id) ON DELETE CASCADE,start_date DATE NOT NULL,end_date DATE NOT NULL,total_hours INT NOT NULL,description TEXT);ALTER TABLE indirect_internships ENABLE ROW LEVEL SECURITY;CREATE POLICY indirect_internships_rls_policy ON indirect_internships FOR ALL USING ((current_setting('app.user_role') = 'TLC') OR (current_setting('app.user_role') = 'DIPARTIMENTO' AND training_project_id IN (SELECT project_id FROM training_projects WHERE department_id = (SELECT department_id FROM users WHERE user_id = current_setting('app.user_id')::uuid))) OR (current_setting('app.user_role') = 'CORSISTA' AND student_id = (SELECT student_id FROM student_profiles WHERE user_id = current_setting('app.user_id')::uuid)) OR (current_setting('app.user_role') = 'COORD_TUTOR' AND coordinator_tutor_id = (SELECT tutor_id FROM coordinator_tutor_profiles WHERE user_id = current_setting('app.user_id')::uuid)));CREATE TABLE direct_internship_attendances (attendance_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),direct_internship_id UUID NOT NULL REFERENCES direct_internships(internship_id) ON DELETE CASCADE,student_id UUID NOT NULL REFERENCES student_profiles(student_id) ON DELETE CASCADE,date DATE NOT NULL,hours_attended INT NOT NULL,description TEXT,UNIQUE (direct_internship_id, date, student_id));ALTER TABLE direct_internship_attendances ENABLE ROW LEVEL SECURITY;CREATE POLICY direct_internship_attendances_rls_policy ON direct_internship_attendances FOR ALL USING ((current_setting('app.user_role') = 'TLC') OR (current_setting('app.user_role') = 'DIPARTIMENTO' AND direct_internship_id IN (SELECT di.internship_id FROM direct_internships di JOIN training_projects tp ON di.training_project_id = tp.project_id WHERE tp.department_id = (SELECT department_id FROM users WHERE user_id = current_setting('app.user_id')::uuid))) OR (current_setting('app.user_role') = 'CORSISTA' AND student_id = (SELECT student_id FROM student_profiles WHERE user_id = current_setting('app.user_id')::uuid)) OR (current_setting('app.user_role') = 'COLLAB_TUTOR' AND direct_internship_id IN (SELECT internship_id FROM direct_internships WHERE collaborator_tutor_id = (SELECT tutor_id FROM collaborator_tutor_profiles WHERE user_id = current_setting('app.user_id')::uuid))));CREATE TABLE indirect_internship_attendances (attendance_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),indirect_internship_id UUID NOT NULL REFERENCES indirect_internships(internship_id) ON DELETE CASCADE,student_id UUID NOT NULL REFERENCES student_profiles(student_id) ON DELETE CASCADE,date DATE NOT NULL,hours_attended INT NOT NULL,description TEXT,UNIQUE (indirect_internship_id, date, student_id));ALTER TABLE indirect_internship_attendances ENABLE ROW LEVEL SECURITY;CREATE POLICY indirect_internship_attendances_rls_policy ON indirect_internship_attendances FOR ALL USING ((current_setting('app.user_role') = 'TLC') OR (current_setting('app.user_role') = 'DIPARTIMENTO' AND indirect_internship_id IN (SELECT idi.internship_id FROM indirect_internships idi JOIN training_projects tp ON idi.training_project_id = tp.project_id WHERE tp.department_id = (SELECT department_id FROM users WHERE user_id = current_setting('app.user_id')::uuid))) OR (current_setting('app.user_role') = 'CORSISTA' AND student_id = (SELECT student_id FROM student_profiles WHERE user_id = current_setting('app.user_id')::uuid)) OR (current_setting('app.user_role') = 'COORD_TUTOR' AND indirect_internship_id IN (SELECT internship_id FROM indirect_internships WHERE coordinator_tutor_id = (SELECT tutor_id FROM coordinator_tutor_profiles WHERE user_id = current_setting('app.user_id')::uuid))));CREATE TABLE payments (payment_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),student_id UUID NOT NULL REFERENCES student_profiles(student_id) ON DELETE CASCADE,academic_year_edition_id UUID NOT NULL REFERENCES academic_years_editions(academic_year_edition_id) ON DELETE CASCADE,amount DECIMAL(10,2) NOT NULL,payment_date DATE NOT NULL,status VARCHAR(50) NOT NULL CHECK (status IN ('Pagato', 'In_Sospeso', 'Rimborsato', 'Annullato')),description TEXT);ALTER TABLE payments ENABLE ROW LEVEL SECURITY;CREATE POLICY payments_rls_policy ON payments FOR ALL USING ((current_setting('app.user_role') = 'TLC') OR (current_setting('app.user_role') = 'DIPARTIMENTO' AND student_id IN (SELECT sp.student_id FROM student_profiles sp JOIN training_projects tp ON sp.student_id = tp.student_id WHERE tp.department_id = (SELECT department_id FROM users WHERE user_id = current_setting('app.user_id')::uuid))) OR (current_setting('app.user_role') = 'CORSISTA' AND student_id = (SELECT student_id FROM student_profiles WHERE user_id = current_setting('app.user_id')::uuid)));CREATE TABLE final_exam_schedule (schedule_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),academic_year_edition_id UUID NOT NULL REFERENCES academic_years_editions(academic_year_edition_id) ON DELETE CASCADE,course_type_id UUID REFERENCES course_types(course_type_id) ON DELETE SET NULL,exam_date DATE NOT NULL,start_time TIME,end_time TIME,location VARCHAR(255),description TEXT);ALTER TABLE final_exam_schedule ENABLE ROW LEVEL SECURITY;CREATE POLICY final_exam_schedule_rls_policy ON final_exam_schedule FOR ALL USING ((current_setting('app.user_role') = 'TLC') OR (current_setting('app.user_role') = 'DIPARTIMENTO' AND academic_year_edition_id IN (SELECT academic_year_edition_id FROM training_projects WHERE department_id = (SELECT department_id FROM users WHERE user_id = current_setting('app.user_id')::uuid))) OR (current_setting('app.user_role') = 'CORSISTA' AND academic_year_edition_id IN (SELECT academic_year_edition_id FROM training_projects WHERE student_id = (SELECT student_id FROM student_profiles WHERE user_id = current_setting('app.user_id')::uuid))));CREATE TABLE final_exam_commissions (commission_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),schedule_id UUID NOT NULL REFERENCES final_exam_schedule(schedule_id) ON DELETE CASCADE,teacher_id UUID NOT NULL REFERENCES teacher_profiles(teacher_id) ON DELETE CASCADE,role_in_commission VARCHAR(100),UNIQUE (schedule_id, teacher_id));ALTER TABLE final_exam_commissions ENABLE ROW LEVEL SECURITY;CREATE POLICY final_exam_commissions_rls_policy ON final_exam_commissions FOR ALL USING ((current_setting('app.user_role') = 'TLC') OR (current_setting('app.user_role') = 'DIPARTIMENTO' AND schedule_id IN (SELECT fes.schedule_id FROM final_exam_schedule fes JOIN training_projects tp ON fes.academic_year_edition_id = tp.academic_year_edition_id WHERE tp.department_id = (SELECT department_id FROM users WHERE user_id = current_setting('app.user_id')::uuid))) OR (current_setting('app.user_role') = 'DOCENTE' AND teacher_id = (SELECT teacher_id FROM teacher_profiles WHERE user_id = current_setting('app.user_id')::uuid))));DROP POLICY IF EXISTS recognitions_rls_policy ON recognitions;DROP TABLE IF EXISTS recognitions CASCADE;CREATE TABLE recognitions (recognition_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),student_id UUID NOT NULL REFERENCES student_profiles(student_id) ON DELETE CASCADE,training_project_id UUID NOT NULL REFERENCES training_projects(project_id) ON DELETE CASCADE,recognized_course_id UUID REFERENCES courses(course_id) ON DELETE SET NULL,recognized_direct_internship_id UUID REFERENCES direct_internships(internship_id) ON DELETE SET NULL,recognized_indirect_internship_id UUID REFERENCES indirect_internships(internship_id) ON DELETE SET NULL,cfu_recognized INT NOT NULL,recognition_date DATE NOT NULL DEFAULT CURRENT_DATE,status VARCHAR(50) NOT NULL CHECK (status IN ('Approvato', 'In_Revisione', 'Rifiutato', 'Annullato')),notes TEXT,CHECK ( (recognized_course_id IS NOT NULL)::INT + (recognized_direct_internship_id IS NOT NULL)::INT + (recognized_indirect_internship_id IS NOT NULL)::INT = 1 ));ALTER TABLE recognitions ENABLE ROW LEVEL SECURITY;CREATE POLICY recognitions_rls_policy ON recognitions FOR ALL USING ((current_setting('app.user_role') = 'TLC') OR (current_setting('app.user_role') = 'DIPARTIMENTO' AND training_project_id IN (SELECT project_id FROM training_projects WHERE department_id = (SELECT u.department_id FROM users u WHERE u.user_id = current_setting('app.user_id')::uuid))) OR (current_setting('app.user_role') = 'CORSISTA' AND student_id = (SELECT student_id FROM student_profiles WHERE user_id = current_setting('app.user_id')::uuid)) OR (current_setting('app.user_role') = 'DOCENTE' AND recognized_course_id IN (SELECT course_id FROM teacher_course_assignments WHERE teacher_id = (SELECT teacher_id FROM teacher_profiles WHERE user_id = current_setting('app.user_id')::uuid))) OR (current_setting('app.user_role') = 'COORD_TUTOR' AND recognized_indirect_internship_id IN (SELECT internship_id FROM indirect_internships WHERE coordinator_tutor_id = (SELECT tutor_id FROM coordinator_tutor_profiles WHERE user_id = current_setting('app.user_id')::uuid))) OR (current_setting('app.user_role') = 'COLLAB_TUTOR' AND recognized_direct_internship_id IN (SELECT internship_id FROM direct_internships WHERE collaborator_tutor_id = (SELECT tutor_id FROM collaborator_tutor_profiles WHERE user_id = current_setting('app.user_id')::uuid))));CREATE TABLE cfu_categories (cfu_category_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),name VARCHAR(255) NOT NULL UNIQUE,category_type VARCHAR(50) NOT NULL CHECK (category_type IN ('DIDATTICA', 'TRASVERSALE', 'TIROCINIO_DIRETTO', 'TIROCINIO_INDIRETTO')),description TEXT);CREATE TABLE course_type_cfu_structure (structure_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),course_type_id UUID NOT NULL REFERENCES course_types(course_type_id) ON DELETE CASCADE,cfu_category_id UUID NOT NULL REFERENCES cfu_categories(cfu_category_id) ON DELETE CASCADE,cfu_amount INT NOT NULL CHECK (cfu_amount >= 0),notes TEXT,UNIQUE (course_type_id, cfu_category_id));",
+  "promptDescription": "Questo schema di database PostgreSQL è stato progettato per la gestione dei Percorsi Abilitanti Insegnanti (PEF) (30/36/60 CFU). Include tabelle per entità fondamentali come 'Dipartimenti' (departments), 'Anni Accademici ed Edizioni' (academic_years_editions), 'Tipologie di Percorso' (course_types), 'Classi di Concorso' (competition_classes), 'Istituti Scolastici' (schools) e 'Referenti USR' (usr_referents). La gestione degli utenti è centralizzata nella tabella 'users', che supporta ruoli specifici (TLC, DIPARTIMENTO, DOCENTE, CORSISTA, COORD_TUTOR, COLLAB_TUTOR) e si collega a tabelle di profilo dedicate come 'student_profiles', 'teacher_profiles', 'coordinator_tutor_profiles' e 'collaborator_tutor_profiles').\n\n**Modifiche principali:**\n\n1.  La tabella `courses` (Insegnamenti) è stata aggiornata per supportare una relazione molti-a-molti con le `competition_classes` (Classi di Concorso). Il campo `competition_class_id` è stato rimosso dalla tabella `courses` ed è stata introdotta una nuova tabella di collegamento, `course_competition_classes`, che associa un insegnamento a una o più classi di concorso.\n2.  La tabella `lessons` (Lezioni) è stata ulteriormente modificata:\n    *   Sono stati rimossi i campi `training_project_id` e `topic` per semplificare la sua gestione. Le lezioni sono ora associate ai progetti formativi tramite gli insegnamenti e le iscrizioni agli insegnamenti.\n    *   È stata introdotta una nuova tabella di collegamento `lesson_competition_classes` per associare una lezione a una o più classi di concorso. Questo permette di indicare per quali classi di concorso una specifica lezione è rilevante.\n    *   Le colonne `pef60_all1_delivery_mode`, `pef30_all2_delivery_mode`, `pef36_all5_delivery_mode`, `pef30_art13_delivery_mode`, `teams_meeting_link` e `lesson_cfu` sono state mantenute per tracciare dettagli specifici sulla modalità di erogazione e l'attribuzione dei CFU.\n\nSono state aggiunte due nuove tabelle per dettagliare la struttura dei CFU dei percorsi formativi: 'cfu_categories' definisce le diverse categorie di crediti (es. Didattiche delle discipline, Area pedagogica, Tirocinio diretto), mentre 'course_type_cfu_structure' specifica quanti CFU di ciascuna categoria sono richiesti per ogni 'Tipologia di Percorso' (course_types). La tabella 'course_types' è stata aggiornata con una colonna 'has_in_itinere_exams' per indicare se sono previste prove di valutazione in itinere per quel percorso. Questa modifica permette una gestione granulare delle specifiche dei PEF 60, 30, 36 e 30 (art. 13) CFU, come richiesto dal DPCM 4 agosto 2023.\n\nLa tabella 'Riconoscimenti' (recognitions) è stata modificata per supportare i riconoscimenti di crediti non solo per specifici insegnamenti, ma anche per i tirocini diretti e indiretti. Ora include le colonne `recognized_course_id`, `recognized_direct_internship_id` e `recognized_indirect_internship_id`, con una constraint che assicura che solo uno di questi campi sia compilato per ogni riconoscimento. Questo permette una maggiore flessibilità nella gestione dei crediti pregressi. Le relazioni chiave collegano i 'Progetti Formativi' (training_projects) a studenti, tipologie di corso, anni accademici e dipartimenti. Gli 'Insegnamenti' (courses) sono associati a classi di concorso e dipartimenti, con assegnazioni specifiche ai docenti tramite 'teacher_course_assignments'. Il percorso formativo prevede 'Lezioni' (lessons) e 'Tirocini' (direct_internships, indirect_internships), entrambi con registrazioni di 'Frequenza' (lesson_attendances, direct_internship_attendances, indirect_internship_attendances). Vengono tracciati anche i 'Pagamenti' (payments), i 'Riconoscimenti' (recognitions) di crediti pregressi, e le 'Prove Finali' (final_exam_schedule, final_exam_commissions). La sicurezza è implementata tramite Row Level Security (RLS) su quasi tutte le tabelle dati, garantendo che i 'CORSISTA' vedano solo i propri dati, i 'DOCENTE' vedano i dati relativi ai propri insegnamenti e ai riconoscimenti dei corsi che insegnano, i 'TUTOR' (coordinatori e collaboratori) vedano i dati dei tirocini a loro assegnati e i relativi riconoscimenti, i 'DIPARTIMENTO' vedano i dati pertinenti al loro dipartimento, e 'TLC' (Super Admin) abbia accesso completo. Le policy RLS utilizzano la funzione `current_setting('app.user_role')` e `current_setting('app.user_id')` per filtrare l'accesso in base al ruolo e all'identificativo dell'utente autenticato dall'applicazione. Le tabelle di configurazione come `cfu_categories`, `course_type_cfu_structure`, `course_competition_classes` e la nuova `lesson_competition_classes` non hanno RLS, essendo dati globalmente consultabili, ma la loro gestione è riservata ai ruoli amministrativi.",
+  "tables": [
+    {
+      "name": "departments",
+      "label": "Dipartimenti",
+      "owners": [
+        "Amministrazione TLC"
+      ],
+      "enableRLS": false,
+      "columns": [
+        {
+          "name": "department_id",
+          "label": "ID Dipartimento",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco del dipartimento."
+        },
+        {
+          "name": "name",
+          "label": "Nome Dipartimento",
+          "type": "VARCHAR(255)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Nome completo del dipartimento."
+        },
+        {
+          "name": "code",
+          "label": "Codice Dipartimento",
+          "type": "VARCHAR(50)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Codice breve del dipartimento."
+        },
+        {
+          "name": "description",
+          "label": "Descrizione",
+          "type": "TEXT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Descrizione del dipartimento."
+        }
+      ]
+    },
+    {
+      "name": "academic_years_editions",
+      "label": "Anni Accademici ed Edizioni",
+      "owners": [
+        "Amministrazione TLC",
+        "Dipartimento"
+      ],
+      "enableRLS": false,
+      "columns": [
+        {
+          "name": "academic_year_edition_id",
+          "label": "ID Anno/Edizione",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco per l'anno accademico e l'edizione."
+        },
+        {
+          "name": "year_label",
+          "label": "Etichetta Anno Accademico",
+          "type": "VARCHAR(100)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Etichetta descrittiva dell'anno accademico (es. '2023/2024')."
+        },
+        {
+          "name": "edition_label",
+          "label": "Etichetta Edizione",
+          "type": "VARCHAR(100)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Etichetta descrittiva dell'edizione del corso (es. 'I Edizione', 'II Edizione')."
+        },
+        {
+          "name": "start_date",
+          "label": "Data Inizio",
+          "type": "DATE",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Data di inizio dell'anno accademico o dell'edizione."
+        },
+        {
+          "name": "end_date",
+          "label": "Data Fine",
+          "type": "DATE",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Data di fine dell'anno accademico o dell'edizione."
+        },
+        {
+          "name": "description",
+          "label": "Descrizione",
+          "type": "TEXT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Descrizione dettagliata dell'anno accademico/edizione."
+        }
+      ]
+    },
+    {
+      "name": "course_types",
+      "label": "Tipologie di Percorso",
+      "owners": [
+        "Amministrazione TLC",
+        "Dipartimento"
+      ],
+      "enableRLS": false,
+      "columns": [
+        {
+          "name": "course_type_id",
+          "label": "ID Tipo Percorso",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco della tipologia di percorso."
+        },
+        {
+          "name": "name",
+          "label": "Nome Tipologia",
+          "type": "VARCHAR(255)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Nome della tipologia di percorso (es. 'PEF 30 CFU', 'PEF 60 CFU')."
+        },
+        {
+          "name": "description",
+          "label": "Descrizione",
+          "type": "TEXT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Descrizione della tipologia di percorso."
+        }
+      ]
+    },
+    {
+      "name": "competition_classes",
+      "label": "Classi di Concorso",
+      "owners": [
+        "Amministrazione TLC",
+        "Dipartimento"
+      ],
+      "enableRLS": false,
+      "columns": [
+        {
+          "name": "competition_class_id",
+          "label": "ID Classe Concorso",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco della classe di concorso."
+        },
+        {
+          "name": "code",
+          "label": "Codice Classe",
+          "type": "VARCHAR(50)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Codice della classe di concorso (es. 'A001')."
+        },
+        {
+          "name": "name",
+          "label": "Nome Classe",
+          "type": "VARCHAR(255)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Nome descrittivo della classe di concorso (es. 'Arte e immagine')."
+        },
+        {
+          "name": "description",
+          "label": "Descrizione",
+          "type": "TEXT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Descrizione della classe di concorso."
+        }
+      ]
+    },
+    {
+      "name": "schools",
+      "label": "Istituti Scolastici",
+      "owners": [
+        "Amministrazione TLC",
+        "Dipartimento"
+      ],
+      "enableRLS": false,
+      "columns": [
+        {
+          "name": "school_id",
+          "label": "ID Scuola",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco dell'istituto scolastico."
+        },
+        {
+          "name": "name",
+          "label": "Nome Scuola",
+          "type": "VARCHAR(255)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Nome completo dell'istituto scolastico."
+        },
+        {
+          "name": "address",
+          "label": "Indirizzo",
+          "type": "VARCHAR(255)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Indirizzo della scuola."
+        },
+        {
+          "name": "city",
+          "label": "Città",
+          "type": "VARCHAR(100)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Città in cui si trova la scuola."
+        },
+        {
+          "name": "province",
+          "label": "Provincia",
+          "type": "VARCHAR(100)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Provincia in cui si trova la scuola."
+        },
+        {
+          "name": "contact_person",
+          "label": "Persona di Contatto",
+          "type": "VARCHAR(255)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Nome della persona di contatto presso la scuola."
+        },
+        {
+          "name": "phone",
+          "label": "Telefono",
+          "type": "VARCHAR(50)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Numero di telefono della scuola."
+        },
+        {
+          "name": "email",
+          "label": "Email",
+          "type": "VARCHAR(255)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Indirizzo email della scuola."
+        }
+      ]
+    },
+    {
+      "name": "usr_referents",
+      "label": "Referenti USR",
+      "owners": [
+        "Amministrazione TLC"
+      ],
+      "enableRLS": false,
+      "columns": [
+        {
+          "name": "usr_referent_id",
+          "label": "ID Referente USR",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco del referente USR."
+        },
+        {
+          "name": "first_name",
+          "label": "Nome",
+          "type": "VARCHAR(100)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Nome del referente USR."
+        },
+        {
+          "name": "last_name",
+          "label": "Cognome",
+          "type": "VARCHAR(100)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Cognome del referente USR."
+        },
+        {
+          "name": "email",
+          "label": "Email",
+          "type": "VARCHAR(255)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Indirizzo email del referente USR."
+        },
+        {
+          "name": "phone",
+          "label": "Telefono",
+          "type": "VARCHAR(50)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Numero di telefono del referente USR."
+        },
+        {
+          "name": "usr_office_name",
+          "label": "Ufficio USR",
+          "type": "VARCHAR(255)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Nome dell'ufficio USR di appartenenza."
+        }
+      ]
+    },
+    {
+      "name": "users",
+      "label": "Utenti del Sistema",
+      "owners": [
+        "Amministrazione TLC"
+      ],
+      "enableRLS": false,
+      "columns": [
+        {
+          "name": "user_id",
+          "label": "ID Utente",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco dell'utente per l'accesso al sistema."
+        },
+        {
+          "name": "email",
+          "label": "Email",
+          "type": "VARCHAR(255)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Indirizzo email dell'utente (usato per login), deve essere unico."
+        },
+        {
+          "name": "password_hash",
+          "label": "Hash Password",
+          "type": "VARCHAR(255)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Hash della password dell'utente per la sicurezza."
+        },
+        {
+          "name": "role",
+          "label": "Ruolo",
+          "type": "VARCHAR(50)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Ruolo dell'utente nell'applicazione (TLC, DIPARTIMENTO, DOCENTE, CORSISTA, COORD_TUTOR, COLLAB_TUTOR)."
+        },
+        {
+          "name": "is_active",
+          "label": "Attivo",
+          "type": "BOOLEAN",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Indica se l'account utente è attivo."
+        },
+        {
+          "name": "department_id",
+          "label": "ID Dipartimento",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": true,
+          "description": "Riferimento al dipartimento per gli utenti con ruolo 'DIPARTIMENTO'."
+        },
+        {
+          "name": "created_at",
+          "label": "Data Creazione",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Timestamp di creazione dell'utente."
+        },
+        {
+          "name": "updated_at",
+          "label": "Data Ultimo Aggiornamento",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Timestamp dell'ultimo aggiornamento dell'utente."
+        }
+      ]
+    },
+    {
+      "name": "student_profiles",
+      "label": "Profili Corsisti",
+      "owners": [
+        "Dipartimento",
+        "Amministrazione TLC"
+      ],
+      "enableRLS": true,
+      "columns": [
+        {
+          "name": "student_id",
+          "label": "ID Corsista",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco del profilo del corsista."
+        },
+        {
+          "name": "user_id",
+          "label": "ID Utente",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento all'utente nel sistema, garantisce un link 1:1 con l'account di accesso.",
+          "references": "users"
+        },
+        {
+          "name": "first_name",
+          "label": "Nome",
+          "type": "VARCHAR(100)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Nome del corsista."
+        },
+        {
+          "name": "last_name",
+          "label": "Cognome",
+          "type": "VARCHAR(100)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Cognome del corsista."
+        },
+        {
+          "name": "fiscal_code",
+          "label": "Codice Fiscale",
+          "type": "VARCHAR(16)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Codice fiscale del corsista, deve essere unico."
+        },
+        {
+          "name": "date_of_birth",
+          "label": "Data di Nascita",
+          "type": "DATE",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Data di nascita del corsista."
+        },
+        {
+          "name": "address",
+          "label": "Indirizzo",
+          "type": "VARCHAR(255)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Indirizzo di residenza del corsista."
+        },
+        {
+          "name": "city",
+          "label": "Città",
+          "type": "VARCHAR(100)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Città di residenza del corsista."
+        },
+        {
+          "name": "phone",
+          "label": "Telefono",
+          "type": "VARCHAR(50)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Numero di telefono del corsista."
+        }
+      ]
+    },
+    {
+      "name": "teacher_profiles",
+      "label": "Profili Docenti",
+      "owners": [
+        "Dipartimento",
+        "Amministrazione TLC"
+      ],
+      "enableRLS": true,
+      "columns": [
+        {
+          "name": "teacher_id",
+          "label": "ID Docente",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco del profilo del docente."
+        },
+        {
+          "name": "user_id",
+          "label": "ID Utente",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento all'utente nel sistema, garantisce un link 1:1 con l'account di accesso.",
+          "references": "users"
+        },
+        {
+          "name": "first_name",
+          "label": "Nome",
+          "type": "VARCHAR(100)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Nome del docente."
+        },
+        {
+          "name": "last_name",
+          "label": "Cognome",
+          "type": "VARCHAR(100)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Cognome del docente."
+        },
+        {
+          "name": "department_id",
+          "label": "ID Dipartimento",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": true,
+          "description": "Riferimento al dipartimento di afferenza del docente.",
+          "references": "departments"
+        },
+        {
+          "name": "competition_class_id",
+          "label": "ID Classe Concorso",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": true,
+          "description": "Riferimento alla classe di concorso principale insegnata dal docente.",
+          "references": "competition_classes"
+        },
+        {
+          "name": "phone",
+          "label": "Telefono",
+          "type": "VARCHAR(50)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Numero di telefono del docente."
+        }
+      ]
+    },
+    {
+      "name": "coordinator_tutor_profiles",
+      "label": "Profili Tutor Coordinatori",
+      "owners": [
+        "Dipartimento",
+        "Amministrazione TLC"
+      ],
+      "enableRLS": true,
+      "columns": [
+        {
+          "name": "tutor_id",
+          "label": "ID Tutor Coordinatore",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco del profilo del tutor coordinatore."
+        },
+        {
+          "name": "user_id",
+          "label": "ID Utente",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento all'utente nel sistema, garantisce un link 1:1 con l'account di accesso.",
+          "references": "users"
+        },
+        {
+          "name": "first_name",
+          "label": "Nome",
+          "type": "VARCHAR(100)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Nome del tutor coordinatore."
+        },
+        {
+          "name": "last_name",
+          "label": "Cognome",
+          "type": "VARCHAR(100)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Cognome del tutor coordinatore."
+        },
+        {
+          "name": "department_id",
+          "label": "ID Dipartimento",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": true,
+          "description": "Riferimento al dipartimento di afferenza del tutor coordinatore.",
+          "references": "departments"
+        },
+        {
+          "name": "phone",
+          "label": "Telefono",
+          "type": "VARCHAR(50)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Numero di telefono del tutor coordinatore."
+        }
+      ]
+    },
+    {
+      "name": "collaborator_tutor_profiles",
+      "label": "Profili Tutor Collaboratori",
+      "owners": [
+        "Dipartimento",
+        "Amministrazione TLC"
+      ],
+      "enableRLS": true,
+      "columns": [
+        {
+          "name": "tutor_id",
+          "label": "ID Tutor Collaboratore",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco del profilo del tutor collaboratore."
+        },
+        {
+          "name": "user_id",
+          "label": "ID Utente",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento all'utente nel sistema, garantisce un link 1:1 con l'account di accesso.",
+          "references": "users"
+        },
+        {
+          "name": "first_name",
+          "label": "Nome",
+          "type": "VARCHAR(100)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Nome del tutor collaboratore."
+        },
+        {
+          "name": "last_name",
+          "label": "Cognome",
+          "type": "VARCHAR(100)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Cognome del tutor collaboratore."
+        },
+        {
+          "name": "school_id",
+          "label": "ID Scuola",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": true,
+          "description": "Riferimento all'istituto scolastico presso cui opera il tutor collaboratore.",
+          "references": "schools"
+        },
+        {
+          "name": "phone",
+          "label": "Telefono",
+          "type": "VARCHAR(50)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Numero di telefono del tutor collaboratore."
+        }
+      ]
+    },
+    {
+      "name": "courses",
+      "label": "Insegnamenti",
+      "owners": [
+        "Dipartimento",
+        "Amministrazione TLC"
+      ],
+      "enableRLS": true,
+      "columns": [
+        {
+          "name": "course_id",
+          "label": "ID Insegnamento",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco dell'insegnamento."
+        },
+        {
+          "name": "name",
+          "label": "Nome Insegnamento",
+          "type": "VARCHAR(255)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Nome dell'insegnamento."
+        },
+        {
+          "name": "description",
+          "label": "Descrizione",
+          "type": "TEXT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Descrizione dettagliata dell'insegnamento."
+        },
+        {
+          "name": "cfu",
+          "label": "CFU",
+          "type": "INT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Crediti Formativi Universitari (CFU) dell'insegnamento."
+        },
+        {
+          "name": "department_id",
+          "label": "ID Dipartimento",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento al dipartimento che offre l'insegnamento.",
+          "references": "departments"
+        }
+      ]
+    },
+    {
+      "name": "course_competition_classes",
+      "label": "Classi di Concorso per Insegnamento",
+      "owners": [
+        "Amministrazione TLC",
+        "Dipartimento"
+      ],
+      "enableRLS": false,
+      "columns": [
+        {
+          "name": "course_id",
+          "label": "ID Insegnamento",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento all'insegnamento.",
+          "references": "courses"
+        },
+        {
+          "name": "competition_class_id",
+          "label": "ID Classe Concorso",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento alla classe di concorso associata all'insegnamento.",
+          "references": "competition_classes"
+        }
+      ],
+      "description": "Tabella di collegamento che definisce quali classi di concorso sono associate a ciascun insegnamento."
+    },
+    {
+      "name": "teacher_course_assignments",
+      "label": "Assegnazione Docenti a Insegnamenti",
+      "owners": [
+        "Dipartimento"
+      ],
+      "enableRLS": true,
+      "columns": [
+        {
+          "name": "assignment_id",
+          "label": "ID Assegnazione",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco dell'assegnazione docente-insegnamento."
+        },
+        {
+          "name": "teacher_id",
+          "label": "ID Docente",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento al docente assegnato all'insegnamento.",
+          "references": "teacher_profiles"
+        },
+        {
+          "name": "course_id",
+          "label": "ID Insegnamento",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento all'insegnamento a cui è assegnato il docente.",
+          "references": "courses"
+        },
+        {
+          "name": "academic_year_edition_id",
+          "label": "ID Anno/Edizione",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento all'anno accademico e all'edizione dell'assegnazione.",
+          "references": "academic_years_editions"
+        }
+      ]
+    },
+    {
+      "name": "training_projects",
+      "label": "Progetti Formativi",
+      "owners": [
+        "Dipartimento",
+        "Amministrazione TLC"
+      ],
+      "enableRLS": true,
+      "columns": [
+        {
+          "name": "project_id",
+          "label": "ID Progetto Formativo",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco del progetto formativo del corsista."
+        },
+        {
+          "name": "student_id",
+          "label": "ID Corsista",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento al corsista associato a questo progetto formativo.",
+          "references": "student_profiles"
+        },
+        {
+          "name": "course_type_id",
+          "label": "ID Tipo Percorso",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento alla tipologia di percorso (es. 30/60 CFU) di questo progetto.",
+          "references": "course_types"
+        },
+        {
+          "name": "academic_year_edition_id",
+          "label": "ID Anno/Edizione",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento all'anno accademico e all'edizione del progetto.",
+          "references": "academic_years_editions"
+        },
+        {
+          "name": "department_id",
+          "label": "ID Dipartimento",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento al dipartimento che gestisce questo progetto formativo.",
+          "references": "departments"
+        },
+        {
+          "name": "status",
+          "label": "Stato",
+          "type": "VARCHAR(50)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Stato attuale del progetto formativo (In_Corso, Completato, Sospeso, Annullato)."
+        },
+        {
+          "name": "start_date",
+          "label": "Data Inizio",
+          "type": "DATE",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Data di inizio del progetto formativo."
+        },
+        {
+          "name": "end_date",
+          "label": "Data Fine",
+          "type": "DATE",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Data di fine prevista o effettiva del progetto formativo."
+        }
+      ]
+    },
+    {
+      "name": "student_course_enrollments",
+      "label": "Iscrizioni Corsisti a Insegnamenti",
+      "owners": [
+        "Dipartimento",
+        "Amministrazione TLC"
+      ],
+      "enableRLS": true,
+      "columns": [
+        {
+          "name": "enrollment_id",
+          "label": "ID Iscrizione",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco dell'iscrizione del corsista a un insegnamento."
+        },
+        {
+          "name": "training_project_id",
+          "label": "ID Progetto Formativo",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento al progetto formativo a cui l'iscrizione si riferisce.",
+          "references": "training_projects"
+        },
+        {
+          "name": "course_id",
+          "label": "ID Insegnamento",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento all'insegnamento a cui il corsista è iscritto.",
+          "references": "courses"
+        },
+        {
+          "name": "enrollment_date",
+          "label": "Data Iscrizione",
+          "type": "DATE",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Data di iscrizione del corsista all'insegnamento."
+        },
+        {
+          "name": "grade",
+          "label": "Voto",
+          "type": "DECIMAL(4,2)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Voto ottenuto dal corsista nell'insegnamento."
+        }
+      ]
+    },
+    {
+      "name": "lessons",
+      "label": "Lezioni",
+      "owners": [
+        "Docente",
+        "Dipartimento"
+      ],
+      "enableRLS": true,
+      "columns": [
+        {
+          "name": "lesson_id",
+          "label": "ID Lezione",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco della lezione."
+        },
+        {
+          "name": "course_id",
+          "label": "ID Insegnamento",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento all'insegnamento a cui la lezione appartiene.",
+          "references": "courses"
+        },
+        {
+          "name": "teacher_id",
+          "label": "ID Docente",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento al docente che tiene la lezione.",
+          "references": "teacher_profiles"
+        },
+        {
+          "name": "lesson_date",
+          "label": "Data Lezione",
+          "type": "DATE",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Data in cui si svolge la lezione."
+        },
+        {
+          "name": "start_time",
+          "label": "Ora Inizio",
+          "type": "TIME",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Ora di inizio della lezione."
+        },
+        {
+          "name": "end_time",
+          "label": "Ora Fine",
+          "type": "TIME",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Ora di fine della lezione."
+        },
+        {
+          "name": "room",
+          "label": "Aula",
+          "type": "VARCHAR(100)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Aula o luogo dove si svolge la lezione."
+        },
+        {
+          "name": "pef60_all1_delivery_mode",
+          "label": "Modalità di Erogazione PEF60 all.1",
+          "type": "VARCHAR(20)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Modalità di erogazione della lezione per i percorsi PEF60 all.1 (Presenza, Online, Non Applicabile)."
+        },
+        {
+          "name": "pef30_all2_delivery_mode",
+          "label": "Modalità di Erogazione PEF30 all.2",
+          "type": "VARCHAR(20)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Modalità di erogazione della lezione per i percorsi PEF30 all.2 (Presenza, Online, Non Applicabile)."
+        },
+        {
+          "name": "pef36_all5_delivery_mode",
+          "label": "Modalità di Erogazione PEF36 all.5",
+          "type": "VARCHAR(20)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Modalità di erogazione della lezione per i percorsi PEF36 all.5 (Presenza, Online, Non Applicabile)."
+        },
+        {
+          "name": "pef30_art13_delivery_mode",
+          "label": "Modalità di Erogazione PEF30 art.13",
+          "type": "VARCHAR(20)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Modalità di erogazione della lezione per i percorsi PEF30 art.13 (Presenza, Online, Non Applicabile)."
+        },
+        {
+          "name": "teams_meeting_link",
+          "label": "Link Riunione Teams",
+          "type": "VARCHAR(255)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Link alla riunione Teams per la lezione, se erogata online."
+        },
+        {
+          "name": "lesson_cfu",
+          "label": "CFU Lezione",
+          "type": "DECIMAL(4,2)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Crediti Formativi Universitari (CFU) attribuiti a questa singola lezione."
+        }
+      ]
+    },
+    {
+      "name": "lesson_competition_classes",
+      "label": "Classi di Concorso per Lezione",
+      "owners": [
+        "Amministrazione TLC",
+        "Dipartimento"
+      ],
+      "enableRLS": false,
+      "columns": [
+        {
+          "name": "lesson_id",
+          "label": "ID Lezione",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento alla lezione.",
+          "references": "lessons"
+        },
+        {
+          "name": "competition_class_id",
+          "label": "ID Classe Concorso",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento alla classe di concorso associata alla lezione.",
+          "references": "competition_classes"
+        }
+      ],
+      "description": "Tabella di collegamento che definisce le classi di concorso a cui è rivolta ogni lezione."
+    },
+    {
+      "name": "lesson_attendances",
+      "label": "Frequenze Lezioni",
+      "owners": [
+        "Docente",
+        "Dipartimento"
+      ],
+      "enableRLS": true,
+      "columns": [
+        {
+          "name": "attendance_id",
+          "label": "ID Frequenza Lezione",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco della frequenza di una lezione."
+        },
+        {
+          "name": "lesson_id",
+          "label": "ID Lezione",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento alla lezione.",
+          "references": "lessons"
+        },
+        {
+          "name": "student_id",
+          "label": "ID Corsista",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento al corsista.",
+          "references": "student_profiles"
+        },
+        {
+          "name": "attendance_status",
+          "label": "Stato Frequenza",
+          "type": "VARCHAR(50)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Stato della frequenza (Presente, Assente, Giustificato)."
+        },
+        {
+          "name": "attendance_date",
+          "label": "Data Registrazione Frequenza",
+          "type": "TIMESTAMP WITH TIME ZONE",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Data e ora della registrazione della frequenza."
+        }
+      ]
+    },
+    {
+      "name": "direct_internships",
+      "label": "Tirocinio Diretto",
+      "owners": [
+        "Dipartimento",
+        "Amministrazione TLC",
+        "COLLAB_TUTOR"
+      ],
+      "enableRLS": true,
+      "columns": [
+        {
+          "name": "internship_id",
+          "label": "ID Tirocinio Diretto",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco del tirocinio diretto."
+        },
+        {
+          "name": "student_id",
+          "label": "ID Corsista",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento al corsista che svolge il tirocinio.",
+          "references": "student_profiles"
+        },
+        {
+          "name": "school_id",
+          "label": "ID Scuola",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento all'istituto scolastico dove si svolge il tirocinio.",
+          "references": "schools"
+        },
+        {
+          "name": "collaborator_tutor_id",
+          "label": "ID Tutor Collaboratore",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": true,
+          "description": "Riferimento al tutor collaboratore che supervisiona il tirocinio.",
+          "references": "collaborator_tutor_profiles"
+        },
+        {
+          "name": "training_project_id",
+          "label": "ID Progetto Formativo",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento al progetto formativo a cui il tirocinio è associato.",
+          "references": "training_projects"
+        },
+        {
+          "name": "start_date",
+          "label": "Data Inizio",
+          "type": "DATE",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Data di inizio del tirocinio."
+        },
+        {
+          "name": "end_date",
+          "label": "Data Fine",
+          "type": "DATE",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Data di fine del tirocinio."
+        },
+        {
+          "name": "total_hours",
+          "label": "Ore Totali",
+          "type": "INT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Numero totale di ore previste per il tirocinio."
+        },
+        {
+          "name": "description",
+          "label": "Descrizione",
+          "type": "TEXT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Descrizione del tirocinio diretto."
+        }
+      ]
+    },
+    {
+      "name": "indirect_internships",
+      "label": "Tirocinio Indiretto",
+      "owners": [
+        "Dipartimento",
+        "Amministrazione TLC",
+        "COORD_TUTOR"
+      ],
+      "enableRLS": true,
+      "columns": [
+        {
+          "name": "internship_id",
+          "label": "ID Tirocinio Indiretto",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco del tirocinio indiretto."
+        },
+        {
+          "name": "student_id",
+          "label": "ID Corsista",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento al corsista che svolge il tirocinio.",
+          "references": "student_profiles"
+        },
+        {
+          "name": "coordinator_tutor_id",
+          "label": "ID Tutor Coordinatore",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": true,
+          "description": "Riferimento al tutor coordinatore che supervisiona il tirocinio.",
+          "references": "coordinator_tutor_profiles"
+        },
+        {
+          "name": "training_project_id",
+          "label": "ID Progetto Formativo",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento al progetto formativo a cui il tirocinio è associato.",
+          "references": "training_projects"
+        },
+        {
+          "name": "start_date",
+          "label": "Data Inizio",
+          "type": "DATE",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Data di inizio del tirocinio."
+        },
+        {
+          "name": "end_date",
+          "label": "Data Fine",
+          "type": "DATE",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Data di fine del tirocinio."
+        },
+        {
+          "name": "total_hours",
+          "label": "Ore Totali",
+          "type": "INT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Numero totale di ore previste per il tirocinio."
+        },
+        {
+          "name": "description",
+          "label": "Descrizione",
+          "type": "TEXT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Descrizione del tirocinio indiretto."
+        }
+      ]
+    },
+    {
+      "name": "direct_internship_attendances",
+      "label": "Frequenza Tirocinio Diretto",
+      "owners": [
+        "COLLAB_TUTOR",
+        "Dipartimento"
+      ],
+      "enableRLS": true,
+      "columns": [
+        {
+          "name": "attendance_id",
+          "label": "ID Frequenza Tirocinio Diretto",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco della frequenza del tirocinio diretto."
+        },
+        {
+          "name": "direct_internship_id",
+          "label": "ID Tirocinio Diretto",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento al tirocinio diretto.",
+          "references": "direct_internships"
+        },
+        {
+          "name": "student_id",
+          "label": "ID Corsista",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento al corsista che ha registrato la frequenza.",
+          "references": "student_profiles"
+        },
+        {
+          "name": "date",
+          "label": "Data Frequenza",
+          "type": "DATE",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Data di registrazione della frequenza."
+        },
+        {
+          "name": "hours_attended",
+          "label": "Ore Frequentate",
+          "type": "INT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Numero di ore frequentate in quella data."
+        },
+        {
+          "name": "description",
+          "label": "Descrizione",
+          "type": "TEXT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Descrizione dell'attività svolta durante la frequenza."
+        }
+      ]
+    },
+    {
+      "name": "indirect_internship_attendances",
+      "label": "Frequenza Tirocinio Indiretto",
+      "owners": [
+        "COORD_TUTOR",
+        "Dipartimento"
+      ],
+      "enableRLS": true,
+      "columns": [
+        {
+          "name": "attendance_id",
+          "label": "ID Frequenza Tirocinio Indiretto",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco della frequenza del tirocinio indiretto."
+        },
+        {
+          "name": "indirect_internship_id",
+          "label": "ID Tirocinio Indiretto",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento al tirocinio indiretto.",
+          "references": "indirect_internships"
+        },
+        {
+          "name": "student_id",
+          "label": "ID Corsista",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento al corsista che ha registrato la frequenza.",
+          "references": "student_profiles"
+        },
+        {
+          "name": "date",
+          "label": "Data Frequenza",
+          "type": "DATE",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Data di registrazione della frequenza."
+        },
+        {
+          "name": "hours_attended",
+          "label": "Ore Frequentate",
+          "type": "INT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Numero di ore frequentate in quella data."
+        },
+        {
+          "name": "description",
+          "label": "Descrizione",
+          "type": "TEXT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Descrizione dell'attività svolta durante la frequenza."
+        }
+      ]
+    },
+    {
+      "name": "payments",
+      "label": "Pagamenti Effettuati",
+      "owners": [
+        "Amministrazione TLC"
+      ],
+      "enableRLS": true,
+      "columns": [
+        {
+          "name": "payment_id",
+          "label": "ID Pagamento",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco del pagamento."
+        },
+        {
+          "name": "student_id",
+          "label": "ID Corsista",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento al corsista che ha effettuato il pagamento.",
+          "references": "student_profiles"
+        },
+        {
+          "name": "academic_year_edition_id",
+          "label": "ID Anno/Edizione",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento all'anno accademico e all'edizione a cui si riferisce il pagamento.",
+          "references": "academic_years_editions"
+        },
+        {
+          "name": "amount",
+          "label": "Importo",
+          "type": "DECIMAL(10,2)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Importo del pagamento."
+        },
+        {
+          "name": "payment_date",
+          "label": "Data Pagamento",
+          "type": "DATE",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Data in cui è stato effettuato il pagamento."
+        },
+        {
+          "name": "status",
+          "label": "Stato Pagamento",
+          "type": "VARCHAR(50)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Stato del pagamento (Pagato, In_Sospeso, Rimborsato, Annullato)."
+        },
+        {
+          "name": "description",
+          "label": "Descrizione",
+          "type": "TEXT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Descrizione del pagamento."
+        }
+      ]
+    },
+    {
+      "name": "final_exam_schedule",
+      "label": "Calendario Prove Finali",
+      "owners": [
+        "Dipartimento",
+        "Amministrazione TLC"
+      ],
+      "enableRLS": true,
+      "columns": [
+        {
+          "name": "schedule_id",
+          "label": "ID Calendario Esame",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco di una voce nel calendario delle prove finali."
+        },
+        {
+          "name": "academic_year_edition_id",
+          "label": "ID Anno/Edizione",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento all'anno accademico e all'edizione a cui si riferisce l'esame.",
+          "references": "academic_years_editions"
+        },
+        {
+          "name": "course_type_id",
+          "label": "ID Tipo Percorso",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": true,
+          "description": "Riferimento alla tipologia di percorso (es. 30/60 CFU) se l'esame è specifico.",
+          "references": "course_types"
+        },
+        {
+          "name": "exam_date",
+          "label": "Data Esame",
+          "type": "DATE",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Data in cui si tiene la prova finale."
+        },
+        {
+          "name": "start_time",
+          "label": "Ora Inizio",
+          "type": "TIME",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Ora di inizio della prova finale."
+        },
+        {
+          "name": "end_time",
+          "label": "Ora Fine",
+          "type": "TIME",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Ora di fine della prova finale."
+        },
+        {
+          "name": "location",
+          "label": "Luogo",
+          "type": "VARCHAR(255)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Luogo o aula dove si svolge la prova finale."
+        },
+        {
+          "name": "description",
+          "label": "Descrizione",
+          "type": "TEXT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Descrizione della prova finale."
+        }
+      ]
+    },
+    {
+      "name": "final_exam_commissions",
+      "label": "Commissioni Prove Finali",
+      "owners": [
+        "Dipartimento",
+        "Amministrazione TLC"
+      ],
+      "enableRLS": true,
+      "columns": [
+        {
+          "name": "commission_id",
+          "label": "ID Commissione",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco della commissione d'esame."
+        },
+        {
+          "name": "schedule_id",
+          "label": "ID Calendario Esame",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento alla voce del calendario delle prove finali a cui appartiene la commissione.",
+          "references": "final_exam_schedule"
+        },
+        {
+          "name": "teacher_id",
+          "label": "ID Docente",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento al docente membro della commissione.",
+          "references": "teacher_profiles"
+        },
+        {
+          "name": "role_in_commission",
+          "label": "Ruolo nella Commissione",
+          "type": "VARCHAR(100)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Ruolo del docente all'interno della commissione (es. 'Presidente', 'Membro')."
+        }
+      ]
+    },
+    {
+      "name": "recognitions",
+      "label": "Riconoscimenti",
+      "owners": [
+        "Dipartimento",
+        "Amministrazione TLC"
+      ],
+      "enableRLS": true,
+      "columns": [
+        {
+          "name": "recognition_id",
+          "label": "ID Riconoscimento",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco del riconoscimento di crediti."
+        },
+        {
+          "name": "student_id",
+          "label": "ID Corsista",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento al corsista che ha richiesto il riconoscimento.",
+          "references": "student_profiles"
+        },
+        {
+          "name": "training_project_id",
+          "label": "ID Progetto Formativo",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento al progetto formativo del corsista.",
+          "references": "training_projects"
+        },
+        {
+          "name": "recognized_course_id",
+          "label": "ID Insegnamento Riconosciuto",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": true,
+          "description": "Riferimento all'insegnamento per cui è richiesto il riconoscimento, se applicabile.",
+          "references": "courses"
+        },
+        {
+          "name": "recognized_direct_internship_id",
+          "label": "ID Tirocinio Diretto Riconosciuto",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": true,
+          "description": "Riferimento al tirocinio diretto per cui è richiesto il riconoscimento, se applicabile.",
+          "references": "direct_internships"
+        },
+        {
+          "name": "recognized_indirect_internship_id",
+          "label": "ID Tirocinio Indiretto Riconosciuto",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": true,
+          "description": "Riferimento al tirocinio indiretto per cui è richiesto il riconoscimento, se applicabile.",
+          "references": "indirect_internships"
+        },
+        {
+          "name": "cfu_recognized",
+          "label": "CFU Riconosciuti",
+          "type": "INT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Numero di CFU riconosciuti."
+        },
+        {
+          "name": "recognition_date",
+          "label": "Data Riconoscimento",
+          "type": "DATE",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Data in cui è stato effettuato il riconoscimento."
+        },
+        {
+          "name": "status",
+          "label": "Stato Riconoscimento",
+          "type": "VARCHAR(50)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Stato del riconoscimento (Approvato, In_Revisione, Rifiutato, Annullato)."
+        },
+        {
+          "name": "notes",
+          "label": "Note",
+          "type": "TEXT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Eventuali note relative al riconoscimento."
+        }
+      ],
+      "description": "Gestisce i riconoscimenti di crediti formativi che possono essere attribuiti per insegnamenti o tirocini."
+    },
+    {
+      "name": "cfu_categories",
+      "label": "Categorie CFU",
+      "owners": [
+        "Amministrazione TLC",
+        "Dipartimento"
+      ],
+      "enableRLS": false,
+      "columns": [
+        {
+          "name": "cfu_category_id",
+          "label": "ID Categoria CFU",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco per una categoria di CFU (es. 'Didattica', 'Tirocinio Diretto')."
+        },
+        {
+          "name": "name",
+          "label": "Nome Categoria",
+          "type": "VARCHAR(255)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Nome descrittivo della categoria di CFU."
+        },
+        {
+          "name": "category_type",
+          "label": "Tipo Categoria",
+          "type": "VARCHAR(50)",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Macro-tipo della categoria di CFU (DIDATTICA, TRASVERSALE, TIROCINIO_DIRETTO, TIROCINIO_INDIRETTO)."
+        },
+        {
+          "name": "description",
+          "label": "Descrizione",
+          "type": "TEXT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Descrizione dettagliata della categoria CFU."
+        }
+      ],
+      "description": "Definisce le diverse categorie di crediti formativi universitari (CFU) che compongono i percorsi abilitanti."
+    },
+    {
+      "name": "course_type_cfu_structure",
+      "label": "Struttura CFU Tipologia Percorso",
+      "owners": [
+        "Amministrazione TLC",
+        "Dipartimento"
+      ],
+      "enableRLS": false,
+      "columns": [
+        {
+          "name": "structure_id",
+          "label": "ID Struttura CFU",
+          "type": "UUID",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Identificatore univoco della voce di struttura dei CFU per una tipologia di percorso."
+        },
+        {
+          "name": "course_type_id",
+          "label": "ID Tipo Percorso",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento alla tipologia di percorso a cui si riferisce questa struttura CFU.",
+          "references": "course_types"
+        },
+        {
+          "name": "cfu_category_id",
+          "label": "ID Categoria CFU",
+          "type": "UUID",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNullable": false,
+          "description": "Riferimento alla categoria di CFU definita per questa tipologia di percorso.",
+          "references": "cfu_categories"
+        },
+        {
+          "name": "cfu_amount",
+          "label": "Quantità CFU",
+          "type": "INT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": false,
+          "description": "Numero di CFU attribuiti a questa categoria per la tipologia di percorso."
+        },
+        {
+          "name": "notes",
+          "label": "Note",
+          "type": "TEXT",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNullable": true,
+          "description": "Eventuali note aggiuntive sulla componente CFU."
+        }
+      ],
+      "description": "Specifica la ripartizione dettagliata dei CFU per le diverse categorie all'interno di ciascuna tipologia di percorso formativo (PEF)."
+    }
+  ]
+}

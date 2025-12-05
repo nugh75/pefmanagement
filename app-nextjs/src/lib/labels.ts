@@ -365,17 +365,7 @@ export const labels = {
     notes: 'Note',
   },
 
-  // Table: Department Competition Classes
-  departmentCompetitionClasses: {
-    _title: 'Classi di Concorso per Dipartimento',
-    id: 'ID',
-    departmentId: 'Dipartimento',
-    competitionClassId: 'Classe di Concorso',
-    isActive: 'Attiva',
-    activationDate: 'Data Attivazione',
-    deactivationDate: 'Data Disattivazione',
-    description: 'Descrizione',
-  },
+
 
   // Common actions
   actions: {
